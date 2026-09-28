@@ -403,7 +403,6 @@ p_endo_filtered
 ggsave("FINAL_FIGURES/dot_Endo.pdf", plot = p_endo_filtered, width = 6, height = 12)
 ```
 
-CD27 = ENSMUSG00000030336 / both not found in the object
 ```{r B-Dotplot}
 b_markers <- list(  
   `Bn` = c("BACH2", "CD72", "FCER2", "TCL1A", "IL4R"),
