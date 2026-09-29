@@ -220,4 +220,4 @@ for (lv in c("rira_fine", "rira_lineage", "rira_effector")) {
 
 ## Data availability
 
-Raw and processed data: [GEO accession]
+Raw and processed data: GSE348023[https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE348023]
