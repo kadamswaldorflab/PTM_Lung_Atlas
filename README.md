@@ -1,6 +1,34 @@
-# Macaque Lung Single-Cell Atlas: Analysis Pipeline
+# Pigtail Macaque Lung Single-Cell Atlas: Analysis Pipeline
 
-Code and parameters for processing, integrating, annotating, and comparing the macaque lung scRNA-seq atlas. This repository accompanies the Methods section of [manuscript citation].
+Code and parameters for processing, integrating, annotating and comparing the pigtail macaque lung scRNA-seq atlas (61,323 cells, 37 cell types, 5 animals). This repository accompanies the Methods section of [manuscript citation].
+
+## Repository contents
+
+| File or folder | What it does |
+|---|---|
+| `Lung_Atlas.ipynb` | QC, doublet removal, scVI and scANVI integration, UMAP and Leiden clustering. Writes `scanvi_output_v2.h5ad` |
+| `Lung_Atlas_Analysis.Rmd` | Applies the annotation, exports the atlas for the IM step, adds the cross-species labels and saves `lung_final.RDS` |
+| `IM_Subclustering.ipynb` | Splits interstitial macrophages (IM) into Mo-IM, IM and cDC2 and removes two subclusters |
+| `Cross_Species_Reference_HLCA.ipynb` | Maps the atlas to the Human Lung Cell Atlas (HLCA) with scArches |
+| `Cross_Species_Reference_RIRA.Rmd` | Transfers labels from the Rhesus Immune Reference Atlas (RIRA) to the immune cells with Seurat |
+| `Lung_Atlas_Figures.Rmd` | Makes all figures from `lung_final.RDS` |
+| `final_cell_labels.csv` | Final cell type of each of the 61,323 cells |
+| `removed_cells.csv` | Reason for removing each of the 7,541 removed cells |
+| `IM/` | Original IM subcluster of each IM cell |
+| `IM_subclustering_output/` | IM labels and the scANVI latent space from `IM_Subclustering.ipynb` |
+| `HLCA/` | Mapped cells, the ortholog table and the HLCA label transfer results |
+| `RIRA/` | Reference and query cell lists and the RIRA label transfer results |
+
+Large intermediate objects (`.h5ad`, `.RDS`) and trained models are not included. Folder paths are set at the top of each notebook and Rmd.
+
+## Run order
+
+1. `Lung_Atlas.ipynb`
+2. `Lung_Atlas_Analysis.Rmd`, part 1
+3. `IM_Subclustering.ipynb`
+4. `Cross_Species_Reference_HLCA.ipynb` and `Cross_Species_Reference_RIRA.Rmd`. These only need `scanvi_output_v2.h5ad` and the cell lists in `HLCA/` and `RIRA/`, so they can run any time after step 1.
+5. `Lung_Atlas_Analysis.Rmd`, part 2
+6. `Lung_Atlas_Figures.Rmd`
 
 ## Software versions
 
@@ -10,13 +38,16 @@ Code and parameters for processing, integrating, annotating, and comparing the m
 | CellBender | 0.3.0 |
 | Python | 3.10.19 |
 | Scanpy | 1.11.5 |
+| anndata | 0.11.4 |
 | Scrublet | 0.2.3 |
 | scvi-tools | 1.3.3 |
 | scArches | 0.6.1 |
+| leidenalg | 0.10.2 |
+| umap-learn | 0.5.9.post2 |
 | R | 4.4.0 |
 | Seurat | 5.5.0 |
 
-A random seed of 42 is used throughout.
+Random seeds are set in every notebook and Rmd (42 unless stated otherwise).
 
 ## Pipeline overview
 
@@ -27,15 +58,17 @@ FASTQ
   -> 3. QC filtering + Scrublet doublet removal (per sample)
   -> 4. HVG selection -> scVI integration -> scANVI refinement
   -> 5. UMAP + Leiden clustering
-  -> 6. Conversion to Seurat, marker-based annotation and subclustering
-  -> 7. Cross-species mapping (HLCA via scArches; RIRA via Seurat label transfer)
+  -> 6. Conversion to Seurat, marker-based annotation and subclustering (35 cell types)
+  -> 7. IM subclustering (37 cell types)
+  -> 8. Cross-species mapping (HLCA via scArches, RIRA via Seurat label transfer)
+  -> 9. Figures
 ```
 
 ## 1. Reference and alignment
 
-- Genome: Mmul10 (GenBank GCA_003339765.3)
-- Annotation: Ensembl release 113, filtered to protein-coding genes
-- Reference built with `cellranger mkref` (v7.2.0); reads aligned with `cellranger count` (v9.0.1)
+- Genome is Mmul10 (GenBank GCA_003339765.3)
+- Annotation is Ensembl release 113, filtered to protein-coding genes
+- Reference built with `cellranger mkref` (v7.2.0), reads aligned with `cellranger count` (v9.0.1)
 
 Rhesus macaque was used as the reference for pigtail macaque samples because of its more complete assembly and annotation.
 
@@ -89,9 +122,11 @@ predicted = scrub.call_doublets(threshold=0.25)
 adata = adata[~predicted].copy()
 ```
 
+68,864 cells from the 5 animals passed QC (21,591 genes).
+
 ## 4. Integration
 
-**Highly variable genes** (raw counts):
+**Highly variable genes** from raw counts.
 
 ```python
 adata.layers["counts"] = adata.X.copy()
@@ -103,7 +138,7 @@ sc.pp.highly_variable_genes(adata, flavor="seurat_v3", n_top_genes=4000,
 adata_hvg = adata[:, adata.var["highly_variable"]].copy()
 ```
 
-**scVI** on raw counts of HVGs, sample as batch:
+**scVI** on raw counts of the HVGs, with sample as batch.
 
 | Parameter | Value |
 |---|---|
@@ -123,7 +158,7 @@ vae.train(max_epochs=116, train_size=0.9, early_stopping=True,
 adata_hvg.obsm["X_scvi"] = vae.get_latent_representation()
 ```
 
-**scANVI** seeded with preliminary Leiden clusters (resolution 0.5, 30-NN graph on scVI latent):
+**scANVI** seeded with preliminary Leiden clusters (resolution 0.5, 30-NN graph on the scVI latent space).
 
 ```python
 sc.pp.neighbors(adata_hvg, use_rep="X_scvi", n_neighbors=30)
@@ -144,32 +179,65 @@ sc.tl.umap(adata_hvg, min_dist=0.3, random_state=42)
 sc.tl.leiden(adata_hvg, resolution=0.5, random_state=42)
 ```
 
-**Integration metric:** inverse Simpson index of sample identity among each cell's 30 nearest neighbors, computed in R on the first 50 principal components of the unintegrated data (4,000 variable genes) and on the scANVI latent space. Median increased from 1.40 (unintegrated) to 2.27 (integrated).
+**Integration metric.** Sample mixing is the inverse Simpson index of sample identity among each cell's 30 nearest neighbors. It is computed in `Lung_Atlas_Figures.Rmd` on the first 50 principal components of the unintegrated data (4,000 variable genes) and on the scANVI latent space. The median increased from 1.40 (unintegrated) to 2.27 (integrated).
 
 ## 6. Annotation (R/Seurat)
 
-The AnnData object is converted to Seurat with `anndata` and `reticulate`.
+The AnnData object is converted to Seurat with `anndata` and `reticulate`. The 28 Leiden clusters were annotated iteratively using cluster markers and canonical lineage markers. Heterogeneous clusters were subclustered on the scVI latent space, with the number of neighbors (10 to 30) and the resolutions (0.02 to 1.0) chosen for each cluster.
 
 ```r
 markers <- FindAllMarkers(obj, only.pos = TRUE,
                           min.pct = 0.25, logfc.threshold = 0.25)
 
-# Subclustering of heterogeneous clusters
+# Subclustering of a heterogeneous cluster
 sub <- FindNeighbors(sub, reduction = "scvi", dims = 1:50, k.param = 30)
 sub <- FindClusters(sub, resolution = c(0.02, 0.05, 0.1, 0.2))
 ```
 
-Clusters were annotated iteratively using cluster markers and canonical lineage markers. Low-quality, ambient-dominated and doublet clusters were removed (7,397 cells), yielding 61,467 cells across 35 cell types. 
-Final labels and removed cells are provided in `final_cell_labels.csv` and `removed_cells.csv`.
+The outcome of the annotation is recorded in `final_cell_labels.csv` and `removed_cells.csv`. `Lung_Atlas_Analysis.Rmd` applies these files to the integrated object to rebuild the annotated atlas.
 
-## 7. Cross-species comparison
+Low-quality, ambient-dominated and doublet cells were removed in two stages. 7,397 cells were removed during annotation, which gave 61,467 cells across 35 cell types. 144 more were removed in the IM step (section 7).
+
+| Reason in `removed_cells.csv` | Cells | Evidence |
+|---|---|---|
+| Ambient RNA | 3,172 | Initial clusters 9 and 12. Very few genes, 0% mitochondrial reads and no specific markers |
+| Neutrophil/T-NK doublets | 378 | Initial cluster 26. Highest doublet score among the initial clusters, with neutrophil and T/NK markers in the same cells |
+| AM doublets/damaged | 1,490 | Alveolar macrophage subclusters with endothelial genes (doublets), mesothelial and lymphocyte genes (contamination), or a loss of abundant cytoplasmic transcripts (damaged cells) |
+| NK/B low quality | 1,265 | NK and B cells with about 420 median genes, expressing only their most abundant transcripts |
+| Sparse endothelium | 522 | Endothelial cluster with the lowest gene counts in the atlas and only broadly expressed endothelial markers |
+| CD8 low quality/RBC | 425 | CD8 T subcluster with half the genes of the main subcluster, and a small subcluster carrying hemoglobin transcripts |
+| AT2 low quality | 145 | AT2 subcluster with low gene counts |
+| IM low quality | 80 | IM subcluster 7 (section 7) |
+| IM possible doublets | 64 | IM subcluster 8 (section 7) |
+| **Total** | **7,541** | |
+
+## 7. IM subclustering
+
+The IM cluster (1,680 cells) was split in `IM_Subclustering.ipynb`. A scANVI model was trained on the full annotated atlas, and the IM cells were subclustered on its latent space.
+
+| Parameter | Value |
+|---|---|
+| Input | 61,467 cells, raw counts of all 21,591 genes |
+| Labels | 35 annotated cell types |
+| Batch | sample |
+| n_layers | 2 |
+| n_latent | 30 |
+| max_epochs | 130 (scvi-tools default) |
+| Neighbors (IM cells) | 15 |
+| Leiden resolution | 0.6 (compared with 1.0) |
+
+Of the nine subclusters, four were named Mo-IM (monocyte-derived IM, 1,066 cells), two IM (335 cells) and one cDC2 (135 cells). Subcluster 7 (80 cells) was removed as low quality. It had the lowest gene counts, a higher mitochondrial fraction than the other subclusters, and 88% of its cells came from one animal. Subcluster 8 (64 cells) was removed as possible doublets. It had the highest gene and UMI counts and co-expressed monocyte and macrophage genes.
+
+The neighbor graph depends on the software environment, so rerunning Leiden can give slightly different subclusters (94% of cells received the same label in a rerun). The labels therefore come from the original subcluster assignment in `IM/im_subclusters_original.csv`, and the rerun is kept as a check. The trained model is not included. With `LOAD_MODEL = False` the notebook retrains it, which changes the latent space slightly but not the labels.
+
+## 8. Cross-species comparison
 
 ### Human (HLCA, scArches)
 
 Following the HLCA mapping tutorial with the core scANVI reference model from scvi-hub.
 
 1. Convert macaque genes to human Ensembl IDs using one-to-one orthologs (Ensembl 113).
-2. Map query as a single unlabeled batch by scArches surgery.
+2. Map the query as a single unlabeled batch by scArches surgery.
 3. Transfer labels at all five HLCA annotation levels.
 
 | Parameter | Value |
@@ -196,9 +264,16 @@ labels, uncert = weighted_knn_transfer(query_adata=query_emb,
                                        ref_adata_obs=ref_emb.obs)
 ```
 
+The mapping was run on 61,612 cells from an earlier version of the annotation (`HLCA/final_cells_for_hlca.csv`), and its labels are used for the 61,323 final cells. `HLCA/hlca_label_transfer.csv` has both the unfiltered labels and the labels after the uncertainty cutoff. The figures show the unfiltered labels with the median uncertainty of each cell type.
+
 ### Rhesus (RIRA, Seurat)
 
-Macaque immune cells compared with the Rhesus Immune Reference Atlas (GSE277821).
+Pigtail macaque immune cells were compared with the Rhesus Immune Reference Atlas (GSE277821).
+
+- The query is the 51,364 immune cells of the atlas, matched to RIRA by gene symbol (15,888 shared genes).
+- The reference (about 19,000 cells) uses lung cells from the three RIRA objects. Cell types with fewer than 150 lung cells were topped up with up to 300 cells from other tissues. Non-lung macrophages (Mac. CD169+, Mac. Liver), promyelocytes and the CD45-High category were removed.
+- The cell lists in `RIRA/` record the exact reference and query, so the transfer can be rerun without repeating the random sampling.
+- A sensitivity analysis capped each RIRA cell type at 400 cells (`RIRA/rira_label_transfer_balanced_sensitivity.csv`).
 
 ```r
 rira_ref <- NormalizeData(rira_ref)
@@ -218,6 +293,10 @@ for (lv in c("rira_fine", "rira_lineage", "rira_effector")) {
 }
 ```
 
+## 9. Figures
+
+`Lung_Atlas_Figures.Rmd` loads `lung_final.RDS` and writes every figure panel to `FINAL_FIGURES/`. The main UMAP is the integration UMAP from section 5. The compartment UMAPs are recomputed from the scANVI latent space of the IM step (30 dimensions, 30 neighbors).
+
 ## Data availability
 
-Raw and processed data: [GSE348023](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE348023)
+Raw and processed data are available from GEO under accession [GSE348023](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE348023).
