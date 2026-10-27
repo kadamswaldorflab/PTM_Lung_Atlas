@@ -180,7 +180,7 @@ p_main <- DimPlot(lung,
                   size = 7, color = "black",
                   bg.color = "white", bg.r = 0.18,
                   box.padding = 0.35, max.overlaps = Inf,
-                  segment.color = "grey40", segment.size = 0.3) +
+                  segment.color = "grey40", segment.size = 0.3, seed = 42) +
   labs(x = "UMAP 1", y = "UMAP 2") +
   ggtitle(NULL) +
   guides(color = guide_legend(ncol = 2, override.aes = list(size = 3))) +
@@ -488,7 +488,7 @@ compartment_umap <- function(types, name) {
                     size = 5, color = "black",
                     bg.color = "white", bg.r = 0.18,
                     box.padding = 0.35, max.overlaps = Inf,
-                    segment.color = "grey40", segment.size = 0.3) +
+                    segment.color = "grey40", segment.size = 0.3, seed = 42) +
     labs(x = "UMAP 1", y = "UMAP 2") +
     ggtitle(NULL) +
     guides(color = guide_legend(ncol = 1, override.aes = list(size = 3))) +
