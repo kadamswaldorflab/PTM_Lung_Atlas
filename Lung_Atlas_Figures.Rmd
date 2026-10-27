@@ -32,13 +32,13 @@ gradient <- c("blue", "white", "red")
 ```
 
 ```{r Load-RDS}
-lung <- readRDS("/mmfs1/gscratch/kawaldorflab/tykim/R_files/Lung_atlas/lung.RDS")
+lung <- readRDS("/mmfs1/gscratch/kawaldorflab/tykim/R_files/Lung_atlas/lung_new.RDS")
 ```
 
 ```{r Normalize}
 DefaultAssay(lung) <- "RNA"
 lung <- NormalizeData(lung, assay = "RNA")
-Idents(lung) <- "cell_type_v5"
+Idents(lung) <- "cell_type_final"
 ```
 
 ```{r Add-NHP-Number}
@@ -64,8 +64,8 @@ p2 <- DimPlot(lung, reduction = "umap", group.by = "sample_id", shuffle = TRUE,
 
 p_umap <- (p1 | p2) + plot_layout(guides = "collect") &
   guides(color = guide_legend(override.aes = list(size = 3))) &
-  theme(plot.title = element_text(size = 24, face = "bold", hjust = 0.5),
-        axis.title = element_text(size = 24, face = "bold"),
+  theme(plot.title = element_text(size = 24, hjust = 0.5),
+        axis.title = element_text(size = 24),
         legend.text = element_text(size = 20),
         legend.key.height = unit(0.8, "cm"))
 p_umap
@@ -99,7 +99,7 @@ p_mix <- ggplot(mix_df, aes(stage, score, fill = stage)) +
   scale_fill_manual(values = c("Before integration" = "#E07B67", "After scANVI" = "#7BAAD0")) +
   labs(x = NULL, y = "Sample mixing\n(inverse Simpson, 30 NN)") +
   theme_classic() +
-  theme(axis.title = element_text(size = 24, face = "bold"),
+  theme(axis.title = element_text(size = 24),
         axis.text = element_text(size = 20)) +
   NoLegend()
 p_mix
@@ -107,15 +107,15 @@ ggsave("FINAL_FIGURES/integration_mixing.pdf", plot = p_mix, width = 8, height =
 ```
 
 ```{r Sample-Comparison}
-p_comp <- ggplot(lung@meta.data, aes(cell_type_v5, fill = sample_id)) +
+p_comp <- ggplot(lung@meta.data, aes(cell_type_final, fill = sample_id)) +
   geom_bar(position = "fill") +
   scale_y_continuous(labels = scales::percent) +
   labs(x = "Cell type", y = "Proportion of cells", fill = "Animal") +
   theme_classic() +
-  theme(axis.title = element_text(size = 24, face = "bold"),
+  theme(axis.title = element_text(size = 24),
         axis.text = element_text(size = 20),
         axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
-        legend.title = element_text(size = 20, face = "bold"),
+        legend.title = element_text(size = 20),
         legend.text = element_text(size = 20),
         legend.key.height = unit(0.8, "cm"))
 p_comp
@@ -130,16 +130,16 @@ qc_features <- c(nFeature_RNA = "RNA Features (count)",
 qc_plots <- lapply(names(qc_features), function(f) {
   VlnPlot(lung,
           features = f,
-          group.by = "cell_type_v5",
+          group.by = "cell_type_final",
           pt.size = 0,
           cols = DiscretePalette_scCustomize(
-              num_colors = length(unique(lung$cell_type_v5)),
-              palette = "polychrome"
+              num_colors = length(unique(lung$cell_type_final)),
+              palette = "ditto_seq"
               )
           ) +
     NoLegend() +
     labs(title = NULL, x = NULL, y = qc_features[[f]]) +
-    theme(axis.title = element_text(size = 24, face = "bold"),
+    theme(axis.title = element_text(size = 24),
           axis.text = element_text(size = 20))
 })
 
@@ -153,28 +153,28 @@ ggsave("FINAL_FIGURES/qc_violin_stack.pdf", plot = qc_stacked, width = 20, heigh
 ```
 
 ```{r Main-UMAP}
-cent <- aggregate(Embeddings(lung, "umap")[, 1:2], by = list(ct = lung$cell_type_v5), FUN = median)
+cent <- aggregate(Embeddings(lung, "umap")[, 1:2], by = list(ct = lung$cell_type_final), FUN = median)
 colnames(cent) <- c("ct", "UMAP_1", "UMAP_2")
 
 p_main <- DimPlot(lung,
                   reduction = "umap",
-                  group.by = "cell_type_v5",
+                  group.by = "cell_type_final",
                   cols = DiscretePalette_scCustomize(
-                      num_colors = length(unique(lung$cell_type_v5)),
-                      palette = "polychrome"
+                      num_colors = length(unique(lung$cell_type_final)),
+                      palette = "ditto_seq"
                       ),
                   label = FALSE,
                   raster = FALSE,
                   pt.size = 0.3) +
   geom_text_repel(data = cent, aes(UMAP_1, UMAP_2, label = ct), inherit.aes = FALSE,
-                  size = 7, fontface = "bold", color = "black",
+                  size = 7, color = "black",
                   bg.color = "white", bg.r = 0.18,
                   box.padding = 0.35, max.overlaps = Inf,
                   segment.color = "grey40", segment.size = 0.3) +
   labs(x = "UMAP 1", y = "UMAP 2") +
   ggtitle(NULL) +
   guides(color = guide_legend(ncol = 2, override.aes = list(size = 3))) +
-  theme(axis.title = element_text(size = 24, face = "bold"),
+  theme(axis.title = element_text(size = 24),
         legend.text = element_text(size = 20), legend.key.height = unit(0.8, "cm"))
 p_main
 ggsave("FINAL_FIGURES/main_umap.pdf", plot = p_main, width = 16, height = 12)
@@ -207,14 +207,14 @@ tconv_markers <- list(
   `CD4+Tmem` = c("CD40LG", "DPP4", "S100A4", "IL32", "LGALS1", "ITGB1", "CD29", "ZNF683"),
   `CD4+Treg` = c("IL2RA", "CTLA4", "TIGIT", "IKZF2", "FOXP3"),
   `CD8+Tem` = c("GZMK", "GZMA"),
-  `CD8+Tcyto` = c("ZEB2", "CX3CR1", "GZMB"),
-  `Lineage` = c("CD3E", "CD4", "CD8A", "ENSMMUG00000003532", "CD69")
+  `CD8+Tcyto` = c("ZEB2", "CX3CR1", "GZMB", "ENSMMUG00000063583"),
+  `Lineage` = c("CD3E", "CD4", "CD8A", "ENSMMUG00000003532", "CD69", "NCAM1")
 )
 tconv_markers <- lapply(tconv_markers, intersect, rownames(lung))
 
 p_tconv <- DotPlot_scCustom(lung,
                             features = unlist(tconv_markers, use.names = FALSE),
-                            group.by = "cell_type_v5",
+                            group.by = "cell_type_final",
                             remove_axis_titles = FALSE,
                             flip_axes = TRUE,
                             x_lab_rotate = TRUE,
@@ -248,7 +248,7 @@ innate_markers <- lapply(innate_markers, intersect, rownames(lung))
 
 p_innate <- DotPlot_scCustom(lung,
                              features = unlist(innate_markers, use.names = FALSE),
-                             group.by = "cell_type_v5",
+                             group.by = "cell_type_final",
                              remove_axis_titles = FALSE,
                              flip_axes = TRUE,
                              x_lab_rotate = TRUE,
@@ -269,21 +269,40 @@ p_innate_filtered
 ggsave("FINAL_FIGURES/dot_Innate.pdf", plot = p_innate_filtered, width = 6, height = 12)
 ```
 
+```{r}
+cand <- intersect(c("GPR183", "PLXDC2", "ABCB4", "RGS1", "CLEC6A", "CPVL", "SERPINB10", "FPR3"),
+                  rownames(lung))
+dat <- LayerData(lung, layer = "data")[cand, ]
+pct <- t(sapply(split(colnames(lung), lung$cell_type_final),
+                function(cc) Matrix::rowMeans(dat[, cc, drop = FALSE] > 0) * 100))
+for (g in cand) {
+  top <- sort(pct[, g], decreasing = TRUE)[1:4]
+  cat(sprintf("%-10s %s\n", g, paste(sprintf("%s %.0f%%", names(top), top), collapse = ", ")))
+}
+```
+
+
+
+
+
+
+
 ```{r Mono-Dotplot}
 mono_markers <- list(
-  `NEUT` = c("FCGR3B", "CSF3R", "CXCR2", "S100A8", "S100A9"),
-  `cMono` = c("FCN1", "VCAN", "NRG1"),
-  `ncMono` = c("FCGR3", "CX3CR1", "TCF7L2"),
-  `IM` = c("TMEM176B", "C1QB", "CLEC5A"),
-  `AM` = c("MARCO", "PPARG", "FABP4", "ABCG1"),
-  `MKI67+AM` = c("MKI67", "TOP2A", "RRM2"),
+  `NEUT`        = c("FCGR3B", "CSF3R", "CXCR2", "S100A8", "S100A9"),
+  `cMono`       = c("FCN1", "VCAN", "NRG1"),
+  `ncMono`      = c("FCGR3", "CX3CR1", "TCF7L2"),
+  `tMac`        = c("CLEC6A", "GPR183", "SERPINB10"),
+  `IM`          = c("STAB1", "LYVE1", "C1QB", "TMEM176B"),
+  `AM`          = c("MARCO", "PPARG", "FABP4", "ABCG1"),
+  `MKI67+AM`    = c("MKI67", "TOP2A", "RRM2"),
   `Pan-myeloid` = c("CD14", "CD163", "CD68", "LYZ", "CSF1R", "SELENOP")
 )
 mono_markers <- lapply(mono_markers, intersect, rownames(lung))
 
 p_mono <- DotPlot_scCustom(lung,
                            features = unlist(mono_markers, use.names = FALSE),
-                           group.by = "cell_type_v5",
+                           group.by = "cell_type_final",
                            remove_axis_titles = FALSE,
                            flip_axes = TRUE,
                            x_lab_rotate = TRUE,
@@ -291,7 +310,7 @@ p_mono <- DotPlot_scCustom(lung,
   labs(x = "Gene", y = "Cluster")
 
 p_mono_filtered <- p_mono +
-  scale_y_discrete(limits = c("NEUT", "cMono", "ncMono", "IM", "AM", "MKI67+AM"),
+  scale_y_discrete(limits = c("NEUT", "cMono", "ncMono", "Mo-IM", "IM", "AM", "MKI67+AM"),
                    expand = expansion(add = 0.4)) +
   geom_vline(xintercept = cumsum(lengths(mono_markers))[-length(mono_markers)] + 0.5,
              linetype = "dashed", color = "grey70") +
@@ -301,21 +320,23 @@ p_mono_filtered <- p_mono +
 
 p_mono_filtered
 
-ggsave("FINAL_FIGURES/dot_Mono.pdf", plot = p_mono_filtered, width = 6, height = 12)
+ggsave("FINAL_FIGURES/dot_Mono.pdf", plot = p_mono_filtered, width = 6.5, height = 11)
 ```
 
 ```{r DC-Dotplot}
 dc_markers <- list(
-  `cDC1` = c("CLEC9A", "XCR1", "CADM1", "DNASE1L3"),
-  `DCmig` = c("CCR7", "LAMP3", "FSCN1", "CCL22", "CCL19"),
-  `pDC` = c("CLEC4C", "LILRA4", "TCF4", "PTCRA", "GZMB", "PLD4", "PTPRS"),
-  `Mast` = c("CPA3", "MS4A2", "TPSAB1", "KIT", "FCER1A", "CMA1", "TPSD1", "TPSB1")
+  `cDC1`   = c("CLEC9A", "XCR1", "CADM1", "DNASE1L3", "WDFY4", "SNX22"),
+  `cDC2`   = c("CD1C", "CLEC10A", "CD1E", "CLEC6A"),
+  `DCmig`  = c("CCR7", "LAMP3", "FSCN1", "CCL22", "BIRC3", "MARCKSL1", "CD274"),
+  `pDC`    = c("LILRA4", "TCF4", "GZMB", "PTCRA", "PLD4", "PTPRS", "CLEC4C"),
+  `Mast`   = c("CPA3", "MS4A2", "TPSAB1", "KIT", "FCER1A", "CMA1", "TPSD1", "TPSB1"),
+  `Pan-DC` = c("FLT3", "ZBTB46")
 )
 dc_markers <- lapply(dc_markers, intersect, rownames(lung))
 
 p_dc <- DotPlot_scCustom(lung,
                          features = unlist(dc_markers, use.names = FALSE),
-                         group.by = "cell_type_v5",
+                         group.by = "cell_type_final",
                          remove_axis_titles = FALSE,
                          flip_axes = TRUE,
                          x_lab_rotate = TRUE,
@@ -323,7 +344,7 @@ p_dc <- DotPlot_scCustom(lung,
   labs(x = "Gene", y = "Cluster")
 
 p_dc_filtered <- p_dc +
-  scale_y_discrete(limits = c("cDC1", "DCmig", "pDC", "Mast"),
+  scale_y_discrete(limits = c("cDC1", "cDC2", "DCmig", "pDC", "Mast"),
                    expand = expansion(add = 0.4)) +
   geom_vline(xintercept = cumsum(lengths(dc_markers))[-length(dc_markers)] + 0.5,
              linetype = "dashed", color = "grey70") +
@@ -333,7 +354,7 @@ p_dc_filtered <- p_dc +
 
 p_dc_filtered
 
-ggsave("FINAL_FIGURES/dot_DC.pdf", plot = p_dc_filtered, width = 6, height = 12)
+ggsave("FINAL_FIGURES/dot_DC.pdf", plot = p_dc_filtered, width = 6.5, height = 11)
 ```
 
 ```{r Epi-Dotplot}
@@ -350,7 +371,7 @@ epi_mes_markers <- lapply(epi_mes_markers, intersect, rownames(lung))
 
 p_epimes <- DotPlot_scCustom(lung,
                              features = unlist(epi_mes_markers, use.names = FALSE),
-                             group.by = "cell_type_v5",
+                             group.by = "cell_type_final",
                              remove_axis_titles = FALSE,
                              flip_axes = TRUE,
                              x_lab_rotate = TRUE,
@@ -382,7 +403,7 @@ endo_markers <- lapply(endo_markers, intersect, rownames(lung))
 
 p_endo <- DotPlot_scCustom(lung,
                            features = unlist(endo_markers, use.names = FALSE),
-                           group.by = "cell_type_v5",
+                           group.by = "cell_type_final",
                            remove_axis_titles = FALSE,
                            flip_axes = TRUE,
                            x_lab_rotate = TRUE,
@@ -400,7 +421,7 @@ p_endo_filtered <- p_endo +
 
 p_endo_filtered
 
-ggsave("FINAL_FIGURES/dot_Endo.pdf", plot = p_endo_filtered, width = 6, height = 12)
+ggsave("FINAL_FIGURES/dot_Endo.pdf", plot = p_endo_filtered, width = 6, height = 9)
 ```
 
 ```{r B-Dotplot}
@@ -415,7 +436,7 @@ b_markers <- lapply(b_markers, intersect, rownames(lung))
 
 p_b <- DotPlot_scCustom(lung,
                         features = unlist(b_markers, use.names = FALSE),
-                        group.by = "cell_type_v5",
+                        group.by = "cell_type_final",
                         remove_axis_titles = FALSE,
                         flip_axes = TRUE,
                         x_lab_rotate = TRUE,
@@ -438,46 +459,50 @@ ggsave("FINAL_FIGURES/dot_B.pdf", plot = p_b_filtered, width = 6, height = 12)
 
 ```{r Subcluster-UMAP}
 atlas_cols <- setNames(
-  DiscretePalette_scCustomize(num_colors = nlevels(lung$cell_type_v5), palette = "polychrome"),
-  levels(lung$cell_type_v5)
+  DiscretePalette_scCustomize(num_colors = nlevels(lung$cell_type_final), palette = "ditto_seq"),
+  levels(lung$cell_type_final)
 )
 
 compartments <- list(
   `lymphoid` = c("Tn", "CD4+Tem", "CD4+Treg", "CD8+Tem", "CD8+Tcyto", "MAIT-like", "Tinn",
                  "gdT", "ILC3", "NK", "MKI67+T/NK"),
-  `b_cell` = c("Bn", "Bmem", "Plasma Cell"),
-  `myeloid` = c("NEUT", "cMono", "ncMono", "IM", "AM", "MKI67+AM", "cDC1", "DCmig", "pDC", "Mast"),
-  `epi_mes` = c("AT1", "AT2", "pre-TB-SC", "Club", "MCC", "FIB", "Mural", "MESO"),
-  `endo` = c("CAP1", "CAP2", "LEC")
+  `b_cell`   = c("Bn", "Bmem", "Plasma Cell"),
+  `myeloid`  = c("NEUT", "cMono", "ncMono", "Mo-IM", "IM", "AM", "MKI67+AM",
+                 "cDC1", "cDC2", "DCmig", "pDC", "Mast"),
+  `epi_mes`  = c("AT1", "AT2", "pre-TB-SC", "Club", "MCC", "FIB", "Mural", "MESO"),
+  `endo`     = c("CAP1", "CAP2", "LEC")
 )
+stopifnot(all(unlist(compartments) %in% levels(lung$cell_type_final)))
 
 compartment_umap <- function(types, name) {
-  sub <- subset(lung, cells = colnames(lung)[lung$cell_type_v5 %in% types])
-  sub$cell_type_v5 <- droplevels(sub$cell_type_v5)
-  sub <- RunUMAP(sub, reduction = "scvi", dims = 1:50, n.neighbors = 30,
+  sub <- subset(lung, cells = colnames(lung)[lung$cell_type_final %in% types])
+  sub$cell_type_final <- droplevels(sub$cell_type_final)
+  sub <- RunUMAP(sub, reduction = "scanvi", dims = 1:30, n.neighbors = 30,
                  reduction.name = "umap_sub", reduction.key = "UMAPsub_", verbose = FALSE)
 
-  cent <- aggregate(Embeddings(sub, "umap_sub")[, 1:2], by = list(ct = sub$cell_type_v5), FUN = median)
+  cent <- aggregate(Embeddings(sub, "umap_sub")[, 1:2], by = list(ct = sub$cell_type_final), FUN = median)
   colnames(cent) <- c("ct", "UMAP_1", "UMAP_2")
 
   p <- DimPlot(sub,
                reduction = "umap_sub",
-               group.by = "cell_type_v5",
-               cols = atlas_cols[levels(sub$cell_type_v5)],
+               group.by = "cell_type_final",
+               cols = atlas_cols[levels(sub$cell_type_final)],
                label = FALSE,
                raster = FALSE,
                pt.size = 0.3) +
     geom_text_repel(data = cent, aes(UMAP_1, UMAP_2, label = ct), inherit.aes = FALSE,
-                    size = 7, fontface = "bold", color = "black",
+                    size = 5, color = "black",
                     bg.color = "white", bg.r = 0.18,
                     box.padding = 0.35, max.overlaps = Inf,
                     segment.color = "grey40", segment.size = 0.3) +
     labs(x = "UMAP 1", y = "UMAP 2") +
     ggtitle(NULL) +
     guides(color = guide_legend(ncol = 1, override.aes = list(size = 3))) +
-    theme(axis.title = element_text(size = 24, face = "bold"),
-          legend.text = element_text(size = 20), legend.key.height = unit(0.8, "cm"))
-  ggsave(paste0("FINAL_FIGURES/sub_umap_", name, ".pdf"), plot = p, width = 14, height = 12)
+    theme(axis.title = element_text(size = 18),
+          legend.text = element_text(size = 14), legend.key.height = unit(0.8, "cm"),
+          axis.line  = element_line(linewidth = 0.3, colour = "grey40"),
+          axis.ticks = element_line(linewidth = 0.3, colour = "grey40"))
+  ggsave(paste0("FINAL_FIGURES/sub_umap_", name, ".pdf"), plot = p, width = 5, height = 5)
   p
 }
 
@@ -487,42 +512,45 @@ for (nm in names(compartments)) print(compartment_umap(compartments[[nm]], nm))
 ```{r Human-Ref}
 hlca_heatmap <- function(level, min_prop = 0.05, file = NULL, width = NULL, height = NULL) {
   lab <- sub("^[0-9]_", "", lung@meta.data[[paste0("hlca_l", level)]])
-  ct <- droplevels(lung$cell_type_v5)
+  ct <- droplevels(lung$cell_type_final)
   prop <- as.matrix(prop.table(table(ct, lab), 1))
   prop <- prop[, apply(prop, 2, max) >= min_prop, drop = FALSE]
   prop <- prop[, order(apply(prop, 2, which.max), -apply(prop, 2, max)), drop = FALSE]
   unc <- as.numeric(tapply(lung@meta.data[[paste0("hlca_l", level, "_uncert")]], ct, median)[rownames(prop)])
 
-  ht <- Heatmap(prop, name = "Fraction\nof cells",
+  ht <- Heatmap(prop, name = "Fraction\nof cells\n",
                 col = colorRamp2(c(0, 0.5, 1), c("white", "#FC8D59", "#B30000")),
                 cluster_rows = FALSE, cluster_columns = FALSE,
                 row_names_side = "left", column_names_rot = 45,
-                row_names_gp = gpar(fontsize = 20),
-                column_names_gp = gpar(fontsize = 20),
-                row_title = "Macaque cell type",
-                row_title_gp = gpar(fontsize = 24, fontface = "bold"),
-                column_title = "\nHuman cell type\n", column_title_side = "bottom",
-                column_title_gp = gpar(fontsize = 24, fontface = "bold"),
+                row_names_gp = gpar(fontsize = 34),
+                column_names_gp = gpar(fontsize = 34),
+                column_names_max_height = max_text_width(colnames(prop), gp = gpar(fontsize = 34)),
+                row_title = "Pigtail Macaque Cell Type",
+                row_title_gp = gpar(fontsize = 52),
+                column_title = "\nHuman Cell Type\n", column_title_side = "bottom",
+                column_title_gp = gpar(fontsize = 52),
                 rect_gp = gpar(col = "grey90", lwd = 0.5),
-                heatmap_legend_param = list(title_gp = gpar(fontsize = 20, fontface = "bold"),
-                                            labels_gp = gpar(fontsize = 20),
+                heatmap_legend_param = list(title_gp = gpar(fontsize = 32),
+                                            labels_gp = gpar(fontsize = 32),
                                             legend_height = unit(5, "cm"),
                                             grid_width = unit(0.8, "cm")),
                 cell_fun = function(j, i, x, y, w, h, fill) {
                   if (prop[i, j] >= 0.1)
                     grid.text(sprintf("%.0f", 100 * prop[i, j]), x, y,
-                              gp = gpar(fontsize = 12, col = ifelse(prop[i, j] >= 0.6, "white", "black")))
+                              gp = gpar(fontsize = 28,
+                                        col = ifelse(prop[i, j] >= 0.6, "white", "black")))
                 },
                 right_annotation = rowAnnotation(
-                  `Median\nuncertainty` = anno_barplot(unc, ylim = c(0, 1), width = unit(3, "cm"),
+                  `Median\nuncertainty` = anno_barplot(unc, ylim = c(0, 1), width = unit(7, "cm"),
+                                                       bar_width = 0.8,
                                                        gp = gpar(fill = "grey40", col = NA),
-                                                       axis_param = list(gp = gpar(fontsize = 16))),
-                  annotation_name_gp = gpar(fontsize = 20, fontface = "bold")))
+                                                       axis_param = list(gp = gpar(fontsize = 24))),
+                  annotation_name_gp = gpar(fontsize = 32)))
 
   if (is.null(width))  width  <- 8 + 1.0 * ncol(prop)
-  if (is.null(height)) height <- 8 + 0.6 * nrow(prop)
+  if (is.null(height)) height <- 10 + 0.6 * nrow(prop)
   main_title <- paste0("HLCA level ", level)
-  title_gp <- gpar(fontsize = 24, fontface = "bold")
+  title_gp <- gpar(fontsize = 32)
   if (!is.null(file)) {
     pdf(file, width = width, height = height)
     draw(ht, column_title = main_title, column_title_gp = title_gp)
@@ -539,44 +567,46 @@ for (lev in 1:5) {
 ```{r Rhesus-Ref-Cell}
 rira_heatmap <- function(col, rows = NULL, min_prop = 0.05, file = NULL, width = NULL, height = NULL, title = NULL) {
   keep_cells <- !is.na(lung@meta.data[[col]]) & lung@meta.data[[col]] != "not T/NK"
-  if (!is.null(rows)) keep_cells <- keep_cells & lung$cell_type_v5 %in% rows
+  if (!is.null(rows)) keep_cells <- keep_cells & lung$cell_type_final %in% rows
   lab <- lung@meta.data[[col]][keep_cells]
-  ct <- droplevels(lung$cell_type_v5[keep_cells])
+  ct <- droplevels(lung$cell_type_final[keep_cells])
   prop <- as.matrix(prop.table(table(ct, lab), 1))
   prop <- prop[, apply(prop, 2, max) >= min_prop, drop = FALSE]
   prop <- prop[, order(apply(prop, 2, which.max), -apply(prop, 2, max)), drop = FALSE]
   unc <- as.numeric(tapply(1 - lung@meta.data[[paste0(col, "_score")]][keep_cells], ct, median)[rownames(prop)])
 
-  ht <- Heatmap(prop, name = "Fraction\nof cells",
+  ht <- Heatmap(prop, name = "Fraction\nof cells\n",
                 col = colorRamp2(c(0, 0.5, 1), c("white", "#74C476", "#00441B")),
                 cluster_rows = FALSE, cluster_columns = FALSE,
                 row_names_side = "left", column_names_rot = 45,
-                row_names_gp = gpar(fontsize = 20),
-                column_names_gp = gpar(fontsize = 20),
-                row_title = "Macaque cell type",
-                row_title_gp = gpar(fontsize = 20, fontface = "bold"),
-                column_title = "Rhesus (RIRA) cell type", column_title_side = "bottom",
-                column_title_gp = gpar(fontsize = 20, fontface = "bold"),
+                row_names_gp = gpar(fontsize = 38),
+                column_names_gp = gpar(fontsize = 38),
+                column_names_max_height = max_text_width(colnames(prop), gp = gpar(fontsize = 32)),
+                row_title = "Pigtail Macaque Cell Type\n",
+                row_title_gp = gpar(fontsize = 48),
+                column_title = "\nRhesus (RIRA) Cell Type\n", column_title_side = "bottom",
+                column_title_gp = gpar(fontsize = 48),
                 rect_gp = gpar(col = "grey90", lwd = 0.5),
-                heatmap_legend_param = list(title_gp = gpar(fontsize = 20, fontface = "bold"),
-                                            labels_gp = gpar(fontsize = 20),
+                heatmap_legend_param = list(title_gp = gpar(fontsize = 32),
+                                            labels_gp = gpar(fontsize = 32),
                                             legend_height = unit(5, "cm"),
                                             grid_width = unit(0.8, "cm")),
                 cell_fun = function(j, i, x, y, w, h, fill) {
                   if (prop[i, j] >= 0.1)
                     grid.text(sprintf("%.0f", 100 * prop[i, j]), x, y,
-                              gp = gpar(fontsize = 12, col = ifelse(prop[i, j] >= 0.6, "white", "black")))
+                              gp = gpar(fontsize = 28,
+                                        col = ifelse(prop[i, j] >= 0.6, "white", "black")))
                 },
                 right_annotation = rowAnnotation(
                   bar = anno_barplot(unc, ylim = c(0, 1), width = unit(3, "cm"),
                                      gp = gpar(fill = "grey40", col = NA),
                                      axis_param = list(gp = gpar(fontsize = 16))),
-                  annotation_label = "Median\n1 - prediction\nscore",
-                  annotation_name_gp = gpar(fontsize = 20, fontface = "bold")))
+                  annotation_label = "Median\nuncertainty",
+                  annotation_name_gp = gpar(fontsize = 32)))
 
   if (is.null(width))  width  <- 8 + 1.0 * ncol(prop)
-  if (is.null(height)) height <- 8 + 0.4 * nrow(prop)
-  title_gp <- gpar(fontsize = 24, fontface = "bold")
+  if (is.null(height)) height <- 10 + 0.6 * nrow(prop)
+  title_gp <- gpar(fontsize = 32)
   if (!is.null(file)) {
     pdf(file, width = width, height = height)
     draw(ht, column_title = title, column_title_gp = title_gp)
@@ -589,47 +619,48 @@ rira_heatmap("rira_fine", file = "FINAL_FIGURES/RIRA_heatmap_celltype.pdf", titl
 ```
 
 ```{r Rhesus-Ref-Eff}
-effector_rows <- setdiff(levels(lung$cell_type_v5), c("Bmem", "cDC1", "ILC3", "IM", "Mast", "ncMono"))
+effector_rows <- setdiff(levels(lung$cell_type_final), c("Bmem", "cDC1", "ILC3", "IM", "Mast", "ncMono"))
 
 keep_cells <- !is.na(lung$rira_effector) & lung$rira_effector != "not T/NK" &
-              lung$cell_type_v5 %in% effector_rows
+              lung$cell_type_final %in% effector_rows
 eff_lab <- lung$rira_effector[keep_cells]
-eff_ct <- droplevels(lung$cell_type_v5[keep_cells])
+eff_ct <- droplevels(lung$cell_type_final[keep_cells])
 eff_prop <- as.matrix(prop.table(table(eff_ct, eff_lab), 1))
 eff_prop <- eff_prop[, apply(eff_prop, 2, max) >= 0.05, drop = FALSE]
 eff_prop <- eff_prop[, order(apply(eff_prop, 2, which.max), -apply(eff_prop, 2, max)), drop = FALSE]
 eff_unc <- as.numeric(tapply(1 - lung$rira_effector_score[keep_cells], eff_ct, median)[rownames(eff_prop)])
 
-ht_eff <- Heatmap(eff_prop, name = "Fraction\nof cells",
+ht_eff <- Heatmap(eff_prop, name = "Fraction\nof cells\n",
                   col = colorRamp2(c(0, 0.5, 1), c("white", "#74C476", "#00441B")),
                   cluster_rows = FALSE, cluster_columns = FALSE,
                   row_names_side = "left", column_names_rot = 45,
-                  row_names_gp = gpar(fontsize = 12),
-                  column_names_gp = gpar(fontsize = 12),
-                  row_title = "Macaque cell type",
-                  row_title_gp = gpar(fontsize = 15, fontface = "bold"),
-                  column_title = "Rhesus (RIRA) cell type", column_title_side = "bottom",
-                  column_title_gp = gpar(fontsize = 15, fontface = "bold"),
+                  row_names_gp = gpar(fontsize = 14),
+                  column_names_gp = gpar(fontsize = 14),
+                  row_title = "Pigtail Macaque Cell Type",
+                  row_title_gp = gpar(fontsize = 22),
+                  column_title = "Rhesus (RIRA) Cell Type", column_title_side = "bottom",
+                  column_title_gp = gpar(fontsize = 22),
                   rect_gp = gpar(col = "grey90", lwd = 0.5),
-                  heatmap_legend_param = list(title_gp = gpar(fontsize = 13, fontface = "bold"),
+                  heatmap_legend_param = list(title_gp = gpar(fontsize = 13),
                                               labels_gp = gpar(fontsize = 13),
                                               legend_height = unit(3.5, "cm"),
                                               grid_width = unit(0.5, "cm")),
                   cell_fun = function(j, i, x, y, w, h, fill) {
                     if (eff_prop[i, j] >= 0.1)
                       grid.text(sprintf("%.0f", 100 * eff_prop[i, j]), x, y,
-                                gp = gpar(fontsize = 8, col = ifelse(eff_prop[i, j] >= 0.6, "white", "black")))
+                                gp = gpar(fontsize = 10,
+                                          col = ifelse(eff_prop[i, j] >= 0.6, "white", "black")))
                   },
                   right_annotation = rowAnnotation(
-                    bar = anno_barplot(eff_unc, ylim = c(0, 1), width = unit(2, "cm"),
+                    bar = anno_barplot(eff_unc, ylim = c(0, 1), width = unit(1, "cm"),
                                        gp = gpar(fill = "grey40", col = NA),
                                        axis_param = list(gp = gpar(fontsize = 10))),
-                    annotation_label = "Median\n1 - prediction\nscore",
-                    annotation_name_gp = gpar(fontsize = 13, fontface = "bold")))
+                    annotation_label = "Median\nuncertainty",
+                    annotation_name_gp = gpar(fontsize = 13)))
 
-eff_title_gp <- gpar(fontsize = 15, fontface = "bold")
+eff_title_gp <- gpar(fontsize = 15)
 pdf("FINAL_FIGURES/RIRA_heatmap_effector.pdf",
-    width = 5 + 0.25 * ncol(eff_prop), height = 4.5 + 0.25 * nrow(eff_prop))
+    width = 5 + 0.3 * ncol(eff_prop), height = 4.5 + 0.3 * nrow(eff_prop))
 draw(ht_eff, column_title = "RIRA effector phenotype", column_title_gp = eff_title_gp)
 dev.off()
 draw(ht_eff, column_title = "RIRA effector phenotype", column_title_gp = eff_title_gp)
@@ -642,8 +673,4 @@ lineage_rows <- c("CD4+Tem", "CD4+Treg", "CD8+Tcyto", "CD8+Tem", "gdT", "MAIT-li
 rira_heatmap("rira_lineage", rows = lineage_rows,
              file = "FINAL_FIGURES/RIRA_heatmap_lineage.pdf",
              title = "RIRA T/NK lineage")
-```
-
-```{r}
-saveRDS(lung, "/mmfs1/gscratch/kawaldorflab/tykim/R_files/Lung_atlas/lung.RDS") 
 ```
