@@ -32,7 +32,7 @@ gradient <- c("blue", "white", "red")
 ```
 
 ```{r Load-RDS}
-lung <- readRDS("/mmfs1/gscratch/kawaldorflab/tykim/R_files/Lung_atlas/lung_new.RDS")
+lung <- readRDS("/mmfs1/gscratch/kawaldorflab/tykim/R_files/Lung_atlas/lung_final.RDS")
 ```
 
 ```{r Normalize}
