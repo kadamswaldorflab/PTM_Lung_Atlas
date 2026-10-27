@@ -1,5 +1,5 @@
 ---
-title: "lung_atlas_final"
+title: "lung_atlas_figures"
 output: pdf_document
 date: "2026-09-24"
 ---
@@ -80,8 +80,18 @@ mix_score <- function(emb, sample) {
   p2 <- sapply(seq_len(nlevels(factor(sample))), function(k) rowMeans(lab == k)^2)
   1 / rowSums(p2)
 }
+
+ad0  <- read_h5ad("/mmfs1/gscratch/kawaldorflab/tykim/R_files/Lung_atlas/scanvi_output_v2.h5ad", backed = "r")
+emb0 <- ad0$obsm[["X_scanvi"]]
+rownames(emb0) <- as.character(ad0$obs_names$to_numpy())
+stopifnot(all(colnames(lung) %in% rownames(emb0)))
+lung[["scanvi_int"]] <- CreateDimReducObject(embeddings = emb0[colnames(lung), ],
+                                             key = "scANVIint_", assay = "RNA")
+rm(ad0, emb0)
+
 lung$mix_pre <- mix_score(Embeddings(lung, "pca_pre"), lung$sample_id)
-lung$mix_scanvi <- mix_score(Embeddings(lung, "scanvi"),  lung$sample_id)
+lung$mix_scanvi <- mix_score(Embeddings(lung, "scanvi_int"), lung$sample_id)
+c(before = median(lung$mix_pre), after = median(lung$mix_scanvi))
 ```
 
 ```{r QC-Violin}
@@ -204,7 +214,7 @@ dot_theme <- theme(axis.title = element_text(size = 24, face = "bold"),
 tconv_markers <- list(
   `MKI67+T/NK` = c("MKI67", "TOP2A", "RRM2"),
   `Tn` = c("CCR7", "SELL", "LEF1"),
-  `CD4+Tmem` = c("CD40LG", "DPP4", "S100A4", "IL32", "LGALS1", "ITGB1", "CD29", "ZNF683"),
+  `CD4+Tem` = c("CD40LG", "DPP4", "S100A4", "IL32", "LGALS1", "ITGB1", "CD29", "ZNF683"),
   `CD4+Treg` = c("IL2RA", "CTLA4", "TIGIT", "IKZF2", "FOXP3"),
   `CD8+Tem` = c("GZMK", "GZMA"),
   `CD8+Tcyto` = c("ZEB2", "CX3CR1", "GZMB", "ENSMMUG00000063583"),
@@ -269,33 +279,15 @@ p_innate_filtered
 ggsave("FINAL_FIGURES/dot_Innate.pdf", plot = p_innate_filtered, width = 6, height = 12)
 ```
 
-```{r}
-cand <- intersect(c("GPR183", "PLXDC2", "ABCB4", "RGS1", "CLEC6A", "CPVL", "SERPINB10", "FPR3"),
-                  rownames(lung))
-dat <- LayerData(lung, layer = "data")[cand, ]
-pct <- t(sapply(split(colnames(lung), lung$cell_type_final),
-                function(cc) Matrix::rowMeans(dat[, cc, drop = FALSE] > 0) * 100))
-for (g in cand) {
-  top <- sort(pct[, g], decreasing = TRUE)[1:4]
-  cat(sprintf("%-10s %s\n", g, paste(sprintf("%s %.0f%%", names(top), top), collapse = ", ")))
-}
-```
-
-
-
-
-
-
-
 ```{r Mono-Dotplot}
 mono_markers <- list(
-  `NEUT`        = c("FCGR3B", "CSF3R", "CXCR2", "S100A8", "S100A9"),
-  `cMono`       = c("FCN1", "VCAN", "NRG1"),
-  `ncMono`      = c("FCGR3", "CX3CR1", "TCF7L2"),
-  `tMac`        = c("CLEC6A", "GPR183", "SERPINB10"),
-  `IM`          = c("STAB1", "LYVE1", "C1QB", "TMEM176B"),
-  `AM`          = c("MARCO", "PPARG", "FABP4", "ABCG1"),
-  `MKI67+AM`    = c("MKI67", "TOP2A", "RRM2"),
+  `NEUT` = c("FCGR3B", "CSF3R", "CXCR2", "S100A8", "S100A9"),
+  `cMono` = c("FCN1", "VCAN", "NRG1"),
+  `ncMono` = c("FCGR3", "CX3CR1", "TCF7L2"),
+  `Mo-IM` = c("CLEC6A", "GPR183", "SERPINB10"),
+  `IM` = c("STAB1", "LYVE1", "C1QB", "TMEM176B"),
+  `AM` = c("MARCO", "PPARG", "FABP4", "ABCG1"),
+  `MKI67+AM` = c("MKI67", "TOP2A", "RRM2"),
   `Pan-myeloid` = c("CD14", "CD163", "CD68", "LYZ", "CSF1R", "SELENOP")
 )
 mono_markers <- lapply(mono_markers, intersect, rownames(lung))
@@ -325,11 +317,11 @@ ggsave("FINAL_FIGURES/dot_Mono.pdf", plot = p_mono_filtered, width = 6.5, height
 
 ```{r DC-Dotplot}
 dc_markers <- list(
-  `cDC1`   = c("CLEC9A", "XCR1", "CADM1", "DNASE1L3", "WDFY4", "SNX22"),
-  `cDC2`   = c("CD1C", "CLEC10A", "CD1E", "CLEC6A"),
-  `DCmig`  = c("CCR7", "LAMP3", "FSCN1", "CCL22", "BIRC3", "MARCKSL1", "CD274"),
-  `pDC`    = c("LILRA4", "TCF4", "GZMB", "PTCRA", "PLD4", "PTPRS", "CLEC4C"),
-  `Mast`   = c("CPA3", "MS4A2", "TPSAB1", "KIT", "FCER1A", "CMA1", "TPSD1", "TPSB1"),
+  `cDC1` = c("CLEC9A", "XCR1", "CADM1", "DNASE1L3", "WDFY4", "SNX22"),
+  `cDC2` = c("CD1C", "CLEC10A", "CD1E", "CLEC6A"),
+  `DCmig` = c("CCR7", "LAMP3", "FSCN1", "CCL22", "BIRC3", "MARCKSL1", "CD274"),
+  `pDC` = c("LILRA4", "TCF4", "GZMB", "PTCRA", "PLD4", "PTPRS", "CLEC4C"),
+  `Mast` = c("CPA3", "MS4A2", "TPSAB1", "KIT", "FCER1A", "CMA1", "TPSD1", "TPSB1"),
   `Pan-DC` = c("FLT3", "ZBTB46")
 )
 dc_markers <- lapply(dc_markers, intersect, rownames(lung))
@@ -360,7 +352,9 @@ ggsave("FINAL_FIGURES/dot_DC.pdf", plot = p_dc_filtered, width = 6.5, height = 1
 ```{r Epi-Dotplot}
 epi_mes_markers <- list(
   `AT1` = c("AGER", "RTKN2", "SCEL", "COL4A3"),
-  `AT2` = c("SFTPC", "SFTPA1", "NAPSA", "LAMP3", "ABCA3", "SCGB1A1", "SCGB3A2"),
+  `AT2` = c("SFTPC", "SFTPA1", "NAPSA", "LAMP3", "ABCA3"),
+  `pre-TB-SC` = c("SCGB3A2", "SFTPB", "SPINK1"),
+  `Club` = c("SCGB1A1", "SCGB3A1", "BPIFB1"),
   `MCC` = c("FOXJ1", "RSPH1", "DNAH5", "CAPS", "PIFO"),
   `FIB` = c("LUM", "FBLN1", "PI16", "SCARA5", "ITGA8"),
   `Mural` = c("COX4I2", "HIGD1B", "PDGFRB", "MYH11", "ACTA2", "TAGLN"),
@@ -392,7 +386,7 @@ p_epimes_filtered
 ggsave("FINAL_FIGURES/dot_EpiMes.pdf", plot = p_epimes_filtered, width = 6, height = 12)
 ```
 
-```{r Mono-Dotplot}
+```{r Endo-Dotplot}
 endo_markers <- list(
   `CAP1` = c("EDN1", "TEK", "PTPRB", "GJA5", "HEY1", "ACKR1", "SELP"),
   `CAP2` = c("EDNRB", "HPGD", "CYP2J2", "SULT1C4"),
@@ -466,11 +460,11 @@ atlas_cols <- setNames(
 compartments <- list(
   `lymphoid` = c("Tn", "CD4+Tem", "CD4+Treg", "CD8+Tem", "CD8+Tcyto", "MAIT-like", "Tinn",
                  "gdT", "ILC3", "NK", "MKI67+T/NK"),
-  `b_cell`   = c("Bn", "Bmem", "Plasma Cell"),
-  `myeloid`  = c("NEUT", "cMono", "ncMono", "Mo-IM", "IM", "AM", "MKI67+AM",
+  `b_cell` = c("Bn", "Bmem", "Plasma Cell"),
+  `myeloid` = c("NEUT", "cMono", "ncMono", "Mo-IM", "IM", "AM", "MKI67+AM",
                  "cDC1", "cDC2", "DCmig", "pDC", "Mast"),
-  `epi_mes`  = c("AT1", "AT2", "pre-TB-SC", "Club", "MCC", "FIB", "Mural", "MESO"),
-  `endo`     = c("CAP1", "CAP2", "LEC")
+  `epi_mes` = c("AT1", "AT2", "pre-TB-SC", "Club", "MCC", "FIB", "Mural", "MESO"),
+  `endo` = c("CAP1", "CAP2", "LEC")
 )
 stopifnot(all(unlist(compartments) %in% levels(lung$cell_type_final)))
 
@@ -619,7 +613,7 @@ rira_heatmap("rira_fine", file = "FINAL_FIGURES/RIRA_heatmap_celltype.pdf", titl
 ```
 
 ```{r Rhesus-Ref-Eff}
-effector_rows <- setdiff(levels(lung$cell_type_final), c("Bmem", "cDC1", "ILC3", "IM", "Mast", "ncMono"))
+effector_rows <- setdiff(levels(lung$cell_type_final), c("Bmem", "cDC1", "cDC2", "ILC3", "IM", "Mo-IM", "Mast", "ncMono"))
 
 keep_cells <- !is.na(lung$rira_effector) & lung$rira_effector != "not T/NK" &
               lung$cell_type_final %in% effector_rows
