@@ -1,0 +1,348 @@
+---
+title: "Lung_Atlas_Analysis"
+output: pdf_document
+date: "2026-10-27"
+---
+
+Annotation of the pigtail macaque lung atlas, from the integrated object to the final annotated object used by `Lung_Atlas_Figures.Rmd`.
+
+Order of the pipeline
+
+1. `Lung_Atlas.ipynb` (QC, scVI, scANVI, initial clusters) writes `scanvi_output_v2.h5ad`
+2. This file, part 1, applies the annotation (35 cell types) and exports the atlas for the IM step
+3. `IM_Subclustering.ipynb` splits IM into Mo-IM, IM and cDC2
+4. This file, part 2, applies the IM labels (37 cell types), adds the HLCA and RIRA labels and saves `lung_final.RDS`
+5. `Lung_Atlas_Figures.Rmd` makes the figures
+
+Inputs
+
+- `scanvi_output_v2.h5ad`, from `Lung_Atlas.ipynb`
+- `final_cell_labels.csv` and `removed_cells.csv`, the final label of every kept cell and the reason for every removed cell
+- `IM_subclustering_output/im_subclusters.csv` and `IM_subclustering_output/atlas_scanvi_embedding.csv`, from `IM_Subclustering.ipynb`
+- `HLCA/hlca_label_transfer.csv`, from `Cross_Species_Reference_HLCA.ipynb`
+- `RIRA/rira_label_transfer.csv`, from `Cross_Species_Reference_RIRA.Rmd`
+
+Removed cells (7,541 of 68,864), by the reason in `removed_cells.csv`
+
+- Ambient RNA (3,172). Initial clusters 9 and 12. Very few genes, 0% mitochondrial reads and only the most abundant transcripts of surrounding cells, with no specific markers.
+- Neutrophil/T-NK doublets (378). Initial cluster 26. The highest doublet score among the initial clusters (median 0.104), with neutrophil and T/NK markers in the same cells.
+- AM doublets/damaged (1,490). Alveolar macrophage subclusters with endothelial genes (doublets), mesothelial and lymphocyte genes (contamination), or a loss of abundant cytoplasmic transcripts (damaged cells).
+- NK/B low quality (1,265). NK and B cells with about 420 median genes, expressing only their most abundant transcripts.
+- Sparse endothelium (522). An endothelial cluster with the lowest gene counts in the atlas and only broadly expressed endothelial markers.
+- CD8 low quality/RBC (425). A CD8 T subcluster with half the genes of the main subcluster and no specific markers, and a small subcluster carrying hemoglobin transcripts.
+- AT2 low quality (145). An AT2 subcluster with low gene counts.
+- IM low quality (80) and IM possible doublets (64). Two IM subclusters removed in `IM_Subclustering.ipynb`.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/gscratch/kawaldorflab/tykim/R_files/Lung_atlas")
+```
+
+```{r library}
+library(dplyr)
+library(Matrix)
+library(Seurat)
+library(SeuratObject)
+library(anndata)
+library(reticulate)
+```
+
+```{r Version-check}
+R.version.string
+sapply(c("Seurat", "SeuratObject", "anndata", "reticulate", "Matrix", "dplyr"),
+       function(p) as.character(packageVersion(p)))
+```
+
+```{r Basic-setting}
+set.seed(42)
+order_levels <- function(x) { lev <- sort(unique(x)); lev[order(tolower(lev), lev)] }
+nhp_map <- c(Z16180np = "NHP1", Z21174np = "NHP2", Z22003np = "NHP3",
+             Z17134np = "NHP4", Z14378np = "NHP5")
+```
+
+# Part 1. Annotation with 35 cell types
+
+```{r h5ad-to-Seurat}
+in_h5ad <- "scanvi_output_v2.h5ad"
+out_rds <- "lung_raw.RDS"
+
+if (!file.exists(out_rds)) {
+  ad <- read_h5ad(in_h5ad)
+  cell_ids <- as.character(ad$obs_names$to_numpy())
+  gene_ids <- gsub("_", "-", as.character(ad$var_names$to_numpy()))
+
+  stopifnot("counts" %in% names(ad$layers))
+  stopifnot(all(dim(ad$X) == dim(ad$layers[["counts"]])))
+  stopifnot(all(c("X_umap", "X_scvi", "X_scanvi") %in% names(ad$obsm)))
+  stopifnot("leiden_initial" %in% colnames(ad$obs))
+  stopifnot(length(cell_ids) == nrow(ad$obs), anyDuplicated(cell_ids) == 0)
+  stopifnot(length(gene_ids) == ncol(ad$X), anyDuplicated(gene_ids) == 0)
+
+  counts_mat <- as(t(ad$layers[["counts"]]), "CsparseMatrix")
+  data_mat <- as(t(ad$X), "CsparseMatrix")
+  dimnames(counts_mat) <- list(gene_ids, cell_ids)
+  dimnames(data_mat) <- list(gene_ids, cell_ids)
+
+  meta <- as.data.frame(ad$obs)
+  rownames(meta) <- cell_ids
+
+  seurat_obj <- CreateSeuratObject(counts = counts_mat, meta.data = meta)
+  stopifnot(identical(colnames(seurat_obj), cell_ids))
+  stopifnot(identical(rownames(seurat_obj), gene_ids))
+  stopifnot(!anyNA(seurat_obj$sample))
+
+  seurat_obj <- SetAssayData(seurat_obj, layer = "data", new.data = data_mat)
+
+  umap_embeddings <- ad$obsm[["X_umap"]]
+  scvi_embeddings <- ad$obsm[["X_scvi"]]
+  scanvi_embeddings <- ad$obsm[["X_scanvi"]]
+  rownames(umap_embeddings) <- cell_ids
+  rownames(scvi_embeddings) <- cell_ids
+  rownames(scanvi_embeddings) <- cell_ids
+
+  seurat_obj[["umap"]] <- CreateDimReducObject(embeddings = umap_embeddings, key = "UMAP_", assay = "RNA")
+  seurat_obj[["scvi"]] <- CreateDimReducObject(embeddings = scvi_embeddings, key = "scVI_", assay = "RNA")
+  seurat_obj[["scanvi"]] <- CreateDimReducObject(embeddings = scanvi_embeddings, key = "scANVI_", assay = "RNA")
+
+  saveRDS(seurat_obj, out_rds)
+  cat("Cells:", ncol(seurat_obj), " Genes:", nrow(seurat_obj), "\n")
+  print(table(seurat_obj$sample))
+}
+```
+
+```{r Load-RDS}
+lung <- readRDS("lung_raw.RDS")
+```
+
+```{r Normalize}
+DefaultAssay(lung) <- "RNA"
+lung <- NormalizeData(lung, assay = "RNA")
+lung$sample_id <- factor(unname(nhp_map[sub("^CTRL_(.*)_lung_ZS_run[0-9]+$", "\\1", lung$sample)]),
+                         levels = paste0("NHP", 1:5))
+stopifnot(ncol(lung) == 68864, !anyNA(lung$sample_id))
+raw_meta <- lung@meta.data   # all 68,864 cells, used for the removal summary in part 2
+```
+
+The 28 Leiden clusters on the scANVI latent space (`leiden`) were the starting point of the annotation.
+
+```{r Initial-Clusters}
+lung$cell_type_v0 <- factor(lung$leiden,
+                            levels = as.character(sort(as.integer(unique(as.character(lung$leiden))))))
+Idents(lung) <- "cell_type_v0"
+
+markers_v0 <- FindAllMarkers(lung, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+top100_v0 <- markers_v0 %>% group_by(cluster) %>% slice_max(avg_log2FC, n = 100) %>% ungroup()
+write.csv(top100_v0, "top100_markers_initial_clusters.csv", row.names = FALSE)
+table(lung$cell_type_v0)
+```
+
+The 35-type labels are the final labels with Mo-IM and cDC2 returned to IM, plus the 144 IM cells removed in the IM step.
+
+```{r Labels-35-Types}
+labels  <- read.csv("final_cell_labels.csv")
+removed <- read.csv("removed_cells.csv")
+stopifnot(!any(labels$cell %in% removed$cell),
+          setequal(c(labels$cell, removed$cell), colnames(lung)))
+
+im_stage <- removed$reason %in% c("IM low quality", "IM possible doublets")
+table(removed$reason[!im_stage])   # 7,397 cells removed during annotation
+
+v5 <- setNames(labels$cell_type, labels$cell)
+v5[v5 %in% c("Mo-IM", "cDC2")] <- "IM"
+v5 <- c(v5, setNames(rep("IM", sum(im_stage)), removed$cell[im_stage]))
+
+lung <- subset(lung, cells = names(v5))
+lung$cell_type_v5 <- factor(unname(v5[colnames(lung)]), levels = order_levels(v5))
+Idents(lung) <- "cell_type_v5"
+
+stopifnot(ncol(lung) == 61467, nlevels(lung$cell_type_v5) == 35, sum(lung$cell_type_v5 == "IM") == 1680)
+table(lung$cell_type_v5)
+```
+
+Export for `IM_Subclustering.ipynb` (raw counts, cell metadata and the original UMAP). Set `EXPORT_DIR` in the notebook to this folder.
+
+```{r Export-for-IM}
+export_dir <- "atlas_export"
+if (!file.exists(file.path(export_dir, "counts.mtx"))) {
+  dir.create(export_dir, showWarnings = FALSE)
+  counts <- LayerData(lung, assay = "RNA", layer = "counts")
+  writeMM(counts, file.path(export_dir, "counts.mtx"))
+  writeLines(rownames(counts), file.path(export_dir, "features.tsv"))
+  writeLines(colnames(counts), file.path(export_dir, "barcodes.tsv"))
+  write.csv(lung@meta.data[, c("sample", "sample_id", "cell_type_v5", "total_counts",
+                               "n_genes_by_counts", "pct_counts_mt", "doublet_score")],
+            file.path(export_dir, "cell_metadata.csv"))
+  write.csv(Embeddings(lung, "umap"), file.path(export_dir, "umap_coords.csv"))
+  rm(counts); gc()
+}
+```
+
+# Part 2. Final annotation with 37 cell types
+
+Run `IM_Subclustering.ipynb` before this part.
+
+```{r Final-Labels}
+im_sub <- read.csv("IM_subclustering_output/im_subclusters.csv")
+stopifnot(setequal(im_sub$cell, colnames(lung)[lung$cell_type_v5 == "IM"]))
+
+lung <- subset(lung, cells = setdiff(colnames(lung), im_sub$cell[im_sub$label == "Removed"]))
+ct <- as.character(lung$cell_type_v5)
+is_im <- colnames(lung) %in% im_sub$cell
+ct[is_im] <- setNames(im_sub$label, im_sub$cell)[colnames(lung)[is_im]]
+lung$cell_type_final <- factor(ct, levels = order_levels(ct))
+Idents(lung) <- "cell_type_final"
+
+# Same labels as final_cell_labels.csv
+final_lab <- setNames(labels$cell_type, labels$cell)
+stopifnot(setequal(colnames(lung), labels$cell),
+          all(as.character(lung$cell_type_final) == final_lab[colnames(lung)]))
+c(cells = ncol(lung), cell_types = nlevels(lung$cell_type_final))
+```
+
+Cross-species labels and the scANVI latent space from the IM step (`scanvi`). The integration latent space from `Lung_Atlas.ipynb` is kept as `scanvi_int`.
+
+```{r Add-Results}
+hlca <- read.csv("HLCA/hlca_label_transfer.csv", row.names = 1)
+stopifnot(all(colnames(lung) %in% rownames(hlca)))
+for (lev in 1:5) {
+  lung@meta.data[[paste0("hlca_l", lev)]] <-
+    hlca[colnames(lung), paste0("ann_level_", lev, "_transferred_label_unfiltered")]
+  lung@meta.data[[paste0("hlca_l", lev, "_uncert")]] <-
+    hlca[colnames(lung), paste0("ann_level_", lev, "_transfer_uncert")]
+}
+
+rira <- read.csv("RIRA/rira_label_transfer.csv", row.names = 1)   # immune cells only
+for (col in colnames(rira)) lung@meta.data[[col]] <- rira[colnames(lung), col]
+structural <- c("AT1", "AT2", "Club", "pre-TB-SC", "MCC", "CAP1", "CAP2", "LEC", "MESO", "FIB", "Mural")
+table(no_rira_label = is.na(lung$rira_fine), structural = lung$cell_type_final %in% structural)
+
+e_int <- Embeddings(lung, "scanvi")
+colnames(e_int) <- paste0("scANVIint_", seq_len(ncol(e_int)))
+lung[["scanvi_int"]] <- CreateDimReducObject(embeddings = e_int, key = "scANVIint_", assay = "RNA")
+
+e_im <- as.matrix(read.csv("IM_subclustering_output/atlas_scanvi_embedding.csv", row.names = 1))
+stopifnot(setequal(rownames(e_im), colnames(lung)))
+lung[["scanvi"]] <- CreateDimReducObject(embeddings = e_im[colnames(lung), ], key = "scANVI_", assay = "RNA")
+Reductions(lung)
+```
+
+# Annotation tables
+
+```{r Final-Markers}
+markers_final <- FindAllMarkers(lung, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+top100_final <- markers_final %>%
+  filter(p_val_adj < 0.05) %>%
+  group_by(cluster) %>%
+  slice_max(avg_log2FC, n = 100, with_ties = FALSE) %>%
+  ungroup()
+write.csv(top100_final, "top100_markers_final_cell_types.csv", row.names = FALSE)
+table(top100_final$cluster)
+```
+
+```{r CellType-QC}
+celltype_qc <- lung@meta.data %>%
+  group_by(cell_type_final) %>%
+  summarise(cells          = n(),
+            median_genes   = median(nFeature_RNA),
+            median_UMI     = median(nCount_RNA),
+            median_mt      = round(median(pct_counts_mt), 2),
+            median_doublet = round(median(doublet_score), 3),
+            top_animal     = names(which.max(table(sample_id))),
+            top_animal_pct = round(100 * max(table(sample_id)) / n(), 1))
+write.csv(celltype_qc, "cell_type_qc_summary.csv", row.names = FALSE)
+write.csv(as.data.frame.matrix(table(lung$cell_type_final, lung$sample_id)), "cell_type_by_animal.csv")
+celltype_qc
+```
+
+```{r Removal-QC}
+rm_reason <- setNames(removed$reason, removed$cell)
+raw_meta$group <- ifelse(rownames(raw_meta) %in% removed$cell, rm_reason[rownames(raw_meta)], "Kept")
+
+removal_qc <- raw_meta %>%
+  group_by(group) %>%
+  summarise(cells          = n(),
+            median_genes   = median(nFeature_RNA),
+            median_UMI     = median(nCount_RNA),
+            median_mt      = round(median(pct_counts_mt), 2),
+            median_doublet = round(median(doublet_score), 3),
+            top_animal_pct = round(100 * max(table(sample_id)) / n(), 1))
+write.csv(removal_qc, "removal_qc_summary.csv", row.names = FALSE)
+removal_qc
+```
+
+```{r Save}
+saveRDS(lung, "lung_final.RDS")
+```
+
+# One-time steps
+
+How `final_cell_labels.csv` and `removed_cells.csv` were made. Step 1 used the annotated object and the seven removal files from the original annotation session. Step 2 added the IM step.
+
+```{r Export-Label-Files, eval = FALSE}
+# Step 1. Annotated object with 35 cell types (61,467 cells)
+v5_obj <- readRDS("lung.RDS")
+write.csv(data.frame(cell = colnames(v5_obj), cell_type = as.character(v5_obj$cell_type_v5)),
+          "final_cell_labels.csv", row.names = FALSE)
+v1 <- read.csv("dropped_cells_v1.csv")   # initial clusters 9 and 26
+v1_reason <- c("9" = "Ambient RNA", "26" = "Neutrophil/T-NK doublets")
+removal_files <- c("AM doublets/damaged" = "dropped_cells_am_v2.csv",
+                   "CD8 low quality/RBC" = "dropped_cells_cd8_v2.csv",
+                   "NK/B low quality"    = "dropped_cells_c8_lowq_v2.csv",
+                   "Ambient RNA"         = "dropped_cells_c12_v2.csv",
+                   "Sparse endothelium"  = "dropped_cells_cap0_v2.csv",
+                   "AT2 low quality"     = "dropped_cells_at2_sub3.csv")
+removed_v5 <- rbind(
+  data.frame(cell = v1$cell, reason = unname(v1_reason[as.character(v1$cluster_v0)])),
+  do.call(rbind, lapply(names(removal_files), function(r)
+    data.frame(cell = read.csv(removal_files[[r]])$cell, reason = r))))
+stopifnot(!anyNA(removed_v5$reason), nrow(removed_v5) == 7397)
+write.csv(removed_v5, "removed_cells.csv", row.names = FALSE)
+
+# Step 2. After the IM step (61,323 cells, 37 cell types)
+file.copy("final_cell_labels.csv", "final_cell_labels_v5.csv")
+file.copy("removed_cells.csv", "removed_cells_v5.csv")
+old_labels  <- read.csv("final_cell_labels_v5.csv")
+removed_old <- read.csv("removed_cells_v5.csv")
+final <- readRDS("lung_new.RDS")
+write.csv(data.frame(cell = colnames(final), cell_type = as.character(final$cell_type_final)),
+          "final_cell_labels.csv", row.names = FALSE)
+im <- read.csv("IM_subclustering_output/im_subclusters.csv")
+im_removed <- im[!is.na(im$removal_reason) & im$removal_reason != "", c("cell", "removal_reason")]
+names(im_removed) <- c("cell", "reason")
+stopifnot(nrow(im_removed) == 144,
+          setequal(im_removed$cell, setdiff(old_labels$cell, colnames(final))))
+write.csv(rbind(removed_old, im_removed), "removed_cells.csv", row.names = FALSE)
+```
+
+Check that `lung_final.RDS` matches `lung_new.RDS`, the object the figures were first made from. Every entry should be `TRUE` or a difference near 0.
+
+```{r Check-Against-Original, eval = FALSE}
+ref <- readRDS("lung_new.RDS")
+cells <- colnames(lung)
+stopifnot(setequal(colnames(ref), cells))
+same_chr <- function(a, b) {
+  a <- as.character(a); b <- as.character(b)
+  a[a %in% "NA"] <- NA; b[b %in% "NA"] <- NA
+  identical(is.na(a), is.na(b)) && all(a[!is.na(a)] == b[!is.na(b)])
+}
+genes <- intersect(rownames(ref), rownames(lung))
+list(
+  labels      = same_chr(ref$cell_type_final[cells], lung$cell_type_final),
+  levels      = identical(levels(ref$cell_type_final), levels(lung$cell_type_final)),
+  genes       = c(shared = length(genes), ref = nrow(ref), final = nrow(lung)),
+  counts_diff = max(abs(LayerData(ref, layer = "counts")[genes, cells] -
+                        LayerData(lung, layer = "counts")[genes, cells])),
+  umap_diff   = max(abs(Embeddings(ref, "umap")[cells, ] - Embeddings(lung, "umap"))),
+  scanvi_diff = max(abs(Embeddings(ref, "scanvi")[cells, ] - Embeddings(lung, "scanvi"))),
+  hlca_l1_l5  = all(sapply(1:5, function(l) same_chr(ref@meta.data[cells, paste0("hlca_l", l)],
+                                                     lung@meta.data[[paste0("hlca_l", l)]]))),
+  hlca_uncert = max(sapply(1:5, function(l) max(abs(ref@meta.data[cells, paste0("hlca_l", l, "_uncert")] -
+                                                    lung@meta.data[[paste0("hlca_l", l, "_uncert")]])))),
+  rira        = all(sapply(c("rira_fine", "rira_lineage", "rira_effector"),
+                           function(x) same_chr(ref@meta.data[cells, x], lung@meta.data[[x]])))
+)
+```
+
+```{r Session-info}
+sessionInfo()
+```
