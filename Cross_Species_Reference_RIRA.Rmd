@@ -1,0 +1,207 @@
+---
+title: "Cross_Species_Reference_RIRA"
+output: pdf_document
+date: "2026-10-27"
+---
+
+Label transfer from the Rhesus Immune Reference Atlas (RIRA, GEO GSE277821) to the immune cells of the pigtail macaque lung atlas, using Seurat anchors.
+
+Inputs
+
+- `GSE277821_RIRA.Bcell.seurat.rds`, `GSE277821_RIRA.Myeloid.seurat.rds` and `GSE277821_RIRA.T_NK.seurat.rds`, downloaded from GEO GSE277821 into `RIRA/`
+- `RIRA/rira_reference_cells.csv`, the RIRA cells in the reference (about 19,000)
+- `RIRA/rira_query_cells.csv`, the 51,364 immune cells of the atlas that were mapped
+- `scanvi_output_v2.h5ad`, the integrated atlas from `Lung_Atlas.ipynb` (raw counts)
+
+The reference uses lung cells from the three RIRA objects. Cell types with fewer than 150 lung cells were topped up with up to 300 randomly sampled cells from other tissues. Non-lung macrophages (Mac. CD169+, Mac. Liver), promyelocytes and the CD45-High category were then removed. The cell lists record the exact reference and query, so the transfer can be rerun without repeating the random sampling.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_knit$set(root.dir = "/gscratch/kawaldorflab/tykim/R_files/Lung_atlas")
+```
+
+```{r library}
+library(dplyr)
+library(Matrix)
+library(Seurat)
+library(SeuratObject)
+library(anndata)
+```
+
+```{r Version-check}
+R.version.string
+sapply(c("Seurat", "SeuratObject", "anndata", "Matrix", "dplyr"),
+       function(p) as.character(packageVersion(p)))
+```
+
+```{r Basic-setting}
+set.seed(42)
+rira_dir <- "RIRA"
+compartments <- c("Bcell", "Myeloid", "T_NK")
+```
+
+Run once on the original results to record the reference and query cells.
+
+```{r Export-Cell-Lists, eval = FALSE}
+ref_saved <- readRDS(file.path(rira_dir, "rira_lung_reference_noCD45High.rds"))
+write.csv(data.frame(cell        = colnames(ref_saved),
+                     compartment = ref_saved$rira_compartment,
+                     rira_fine   = ref_saved$rira_fine,
+                     tissue      = ref_saved$Tissue),
+          file.path(rira_dir, "rira_reference_cells.csv"), row.names = FALSE)
+
+pred_saved <- read.csv(file.path(rira_dir, "rira_label_transfer_noCD45High.csv"), row.names = 1)
+write.csv(data.frame(cell = rownames(pred_saved)),
+          file.path(rira_dir, "rira_query_cells.csv"), row.names = FALSE)
+
+c(reference_cells = ncol(ref_saved), query_cells = nrow(pred_saved))
+```
+
+Cell type labels are `TCellSubtype` (T/NK), `MyeloidSubtype` (myeloid) or "B cell" (B cells). T/NK lineage is `TNK_Type` and effector phenotype is `EffectorPheno`, which exist only for T/NK cells.
+
+```{r Build-Reference}
+ref_cells <- read.csv(file.path(rira_dir, "rira_reference_cells.csv"))
+
+mats <- list(); metas <- list()
+for (s in compartments) {
+  obj <- readRDS(file.path(rira_dir, paste0("GSE277821_RIRA.", s, ".seurat.rds")))
+  md <- obj@meta.data
+  md$rira_fine <- switch(s,
+    Bcell   = ifelse(is.na(md$RIRA_Immune_v2.cellclass), NA_character_, "B cell"),
+    Myeloid = as.character(md$MyeloidSubtype),
+    T_NK    = as.character(md$TCellSubtype))
+  md$rira_lineage     <- if (s == "T_NK") as.character(md$TNK_Type) else NA_character_
+  md$rira_effector    <- if (s == "T_NK") as.character(md$EffectorPheno) else NA_character_
+  md$rira_compartment <- s
+
+  keep_named <- ref_cells$cell[ref_cells$compartment == s]
+  keep <- sub(paste0("^", s, "_"), "", keep_named)
+  stopifnot(all(keep %in% rownames(md)))
+
+  m <- SeuratObject::LayerData(obj, assay = "RNA", layer = "counts")[, keep, drop = FALSE]
+  colnames(m) <- keep_named
+  mm <- md[keep, c("rira_compartment", "rira_fine", "rira_lineage", "rira_effector", "Tissue", "SubjectId")]
+  rownames(mm) <- keep_named
+  mats[[s]] <- m; metas[[s]] <- mm
+  cat(s, "cells:", length(keep), "\n")
+  rm(obj, md, m, mm); gc()
+}
+
+stopifnot(identical(rownames(mats$Bcell), rownames(mats$Myeloid)),
+          identical(rownames(mats$Bcell), rownames(mats$T_NK)))
+ref_counts <- do.call(cbind, unname(mats))[, ref_cells$cell]
+ref_meta   <- do.call(rbind, unname(metas))[ref_cells$cell, ]
+rm(mats, metas); gc()
+
+rira_ref <- CreateSeuratObject(counts = ref_counts, meta.data = ref_meta)
+rm(ref_counts, ref_meta)
+stopifnot(identical(colnames(rira_ref), ref_cells$cell),
+          all(rira_ref$rira_fine == ref_cells$rira_fine))
+
+table(rira_ref$rira_fine, ifelse(rira_ref$Tissue == "Lung", "lung", "other"))
+```
+
+The query is the immune cells of the atlas, taken from the raw counts in `scanvi_output_v2.h5ad`. Genes are matched to RIRA by symbol, since both datasets were aligned to Mmul_10.
+
+```{r Query}
+q_cells <- read.csv(file.path(rira_dir, "rira_query_cells.csv"))$cell
+
+ad <- read_h5ad("scanvi_output_v2.h5ad")
+cell_ids <- as.character(ad$obs_names$to_numpy())
+gene_ids <- gsub("_", "-", as.character(ad$var_names$to_numpy()))
+counts <- as(t(ad$layers[["counts"]]), "CsparseMatrix")
+dimnames(counts) <- list(gene_ids, cell_ids)
+meta <- data.frame(sample = as.character(ad$obs[["sample"]]), row.names = cell_ids)
+rm(ad); gc()
+stopifnot(all(q_cells %in% cell_ids))
+
+shared <- intersect(rownames(rira_ref), gene_ids)
+cat("shared genes:", length(shared), "| query cells:", length(q_cells), "\n")
+
+rira_q <- CreateSeuratObject(counts = counts[shared, q_cells],
+                             meta.data = meta[q_cells, , drop = FALSE])
+rira_ref <- subset(rira_ref, features = shared)
+rm(counts, meta); gc()
+```
+
+Three label sets are transferred from one anchor set. Cells without a T/NK lineage or effector label in RIRA (B cells and myeloid cells) are labeled "not T/NK" for those two sets.
+
+```{r Transfer}
+rira_ref <- NormalizeData(rira_ref)
+rira_ref <- FindVariableFeatures(rira_ref, nfeatures = 2000)
+rira_ref <- ScaleData(rira_ref)
+rira_ref <- RunPCA(rira_ref, npcs = 30)
+rira_q   <- NormalizeData(rira_q)
+
+anchors <- FindTransferAnchors(reference = rira_ref, query = rira_q,
+                               dims = 1:30, reference.reduction = "pca")
+
+rira_pred <- data.frame(row.names = q_cells)
+for (lv in c("rira_fine", "rira_lineage", "rira_effector")) {
+  refdata <- as.character(rira_ref@meta.data[[lv]])
+  refdata[is.na(refdata)] <- "not T/NK"
+  names(refdata) <- colnames(rira_ref)
+  pred <- TransferData(anchorset = anchors, refdata = refdata, dims = 1:30)
+  rira_pred[[lv]] <- pred[q_cells, "predicted.id"]
+  rira_pred[[paste0(lv, "_score")]] <- pred[q_cells, "prediction.score.max"]
+}
+write.csv(rira_pred, file.path(rira_dir, "rira_label_transfer.csv"))
+sort(table(rira_pred$rira_fine), decreasing = TRUE)
+```
+
+```{r Check-Original}
+orig_file <- file.path(rira_dir, "rira_label_transfer_noCD45High.csv")
+if (file.exists(orig_file)) {
+  orig <- read.csv(orig_file, row.names = 1)[q_cells, ]
+  for (lv in c("rira_fine", "rira_lineage", "rira_effector")) {
+    cat(sprintf("%-14s label agreement %.4f | max score difference %.2e\n", lv,
+                mean(orig[[lv]] == rira_pred[[lv]]),
+                max(abs(orig[[paste0(lv, "_score")]] - rira_pred[[paste0(lv, "_score")]]))))
+  }
+}
+```
+Each RIRA cell type is capped at 400 cells, so that large types in the reference cannot dominate the transfer.
+
+```{r Balanced-Reference}
+set.seed(42)
+bal <- unlist(lapply(split(colnames(rira_ref), rira_ref$rira_fine),
+                     function(x) if (length(x) > 400) sample(x, 400) else x), use.names = FALSE)
+ref_bal <- subset(rira_ref, cells = bal)
+table(ref_bal$rira_fine)
+
+ref_bal <- NormalizeData(ref_bal)
+ref_bal <- FindVariableFeatures(ref_bal, nfeatures = 2000)
+ref_bal <- ScaleData(ref_bal)
+ref_bal <- RunPCA(ref_bal, npcs = 30)
+
+a2 <- FindTransferAnchors(reference = ref_bal, query = rira_q,
+                          dims = 1:30, reference.reduction = "pca")
+p2 <- TransferData(anchorset = a2,
+                   refdata = setNames(as.character(ref_bal$rira_fine), colnames(ref_bal)),
+                   dims = 1:30)
+
+bal_out <- data.frame(cell                     = q_cells,
+                      rira_fine_balanced       = p2[q_cells, "predicted.id"],
+                      rira_fine_balanced_score = p2[q_cells, "prediction.score.max"])
+write.csv(bal_out, file.path(rira_dir, "rira_label_transfer_balanced_sensitivity.csv"), row.names = FALSE)
+```
+
+```{r Primary-vs-Balanced}
+if (file.exists("final_cell_labels.csv")) {
+  labels <- read.csv("final_cell_labels.csv")
+  ct <- setNames(labels$cell_type, labels$cell)[q_cells]
+  keep <- !is.na(ct)
+  top <- function(x) {
+    v <- sort(table(x), decreasing = TRUE)
+    sprintf("%s (%.0f%%)", names(v)[1], 100 * v[1] / sum(v))
+  }
+  comp <- data.frame(primary  = tapply(rira_pred$rira_fine[keep], ct[keep], top),
+                     balanced = tapply(bal_out$rira_fine_balanced[keep], ct[keep], top))
+  write.csv(comp, file.path(rira_dir, "rira_primary_vs_balanced.csv"))
+  comp
+}
+```
+
+```{r Session-info}
+sessionInfo()
+```
