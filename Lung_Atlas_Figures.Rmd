@@ -29,6 +29,22 @@ setwd("/gscratch/kawaldorflab/tykim/R_files/Lung_atlas")
 set.seed(42)
 
 gradient <- c("blue", "white", "red")
+
+atlas_cols <- c(
+  "AM" = "#6B2C5E",           "AT1" = "#998655",          "AT2" = "#FC6B33",
+  "Bmem" = "#FF85D0",         "Bn" = "#2B31AB",           "CAP1" = "#5B9D94",
+  "CAP2" = "#0B67A9",         "CD4+Tem" = "#AFA965",      "CD4+Treg" = "#395014",
+  "CD8+Tcyto" = "#1FD68F",    "CD8+Tem" = "#5569E7",      "cDC1" = "#097017",
+  "cDC2" = "#C0C745",         "Club" = "#6D422B",         "cMono" = "#0D4F64",
+  "DCmig" = "#9030A4",        "FIB" = "#CA87A4",          "gdT" = "#3198D6",
+  "ILC3" = "#F0A432",         "IM" = "#73631C",           "LEC" = "#834E77",
+  "MAIT-like" = "#A72028",    "Mast" = "#8E749F",         "MCC" = "#C9459C",
+  "MESO" = "#89CDC3",         "MKI67+AM" = "#FD9581",     "MKI67+T/NK" = "#30BFEB",
+  "Mo-IM" = "#C576F2",        "Mural" = "#628726",        "ncMono" = "#F25980",
+  "NEUT" = "#017A78",         "NK" = "#B75A38",           "pDC" = "#AAB0EF",
+  "Plasma Cell" = "#3CB067",  "pre-TB-SC" = "#8587FC",    "Tinn" = "#AC1B6E",
+  "Tn" = "#9A5BDA"
+)
 ```
 
 ```{r Load-RDS}
@@ -142,10 +158,7 @@ qc_plots <- lapply(names(qc_features), function(f) {
           features = f,
           group.by = "cell_type_final",
           pt.size = 0,
-          cols = DiscretePalette_scCustomize(
-              num_colors = length(unique(lung$cell_type_final)),
-              palette = "ditto_seq"
-              )
+          cols = atlas_cols[levels(lung$cell_type_final)]
           ) +
     NoLegend() +
     labs(title = NULL, x = NULL, y = qc_features[[f]]) +
@@ -169,10 +182,7 @@ colnames(cent) <- c("ct", "UMAP_1", "UMAP_2")
 p_main <- DimPlot(lung,
                   reduction = "umap",
                   group.by = "cell_type_final",
-                  cols = DiscretePalette_scCustomize(
-                      num_colors = length(unique(lung$cell_type_final)),
-                      palette = "ditto_seq"
-                      ),
+                  cols = atlas_cols[levels(lung$cell_type_final)],
                   label = FALSE,
                   raster = FALSE,
                   pt.size = 0.3) +
@@ -452,11 +462,6 @@ ggsave("FINAL_FIGURES/dot_B.pdf", plot = p_b_filtered, width = 6, height = 12)
 ```
 
 ```{r Subcluster-UMAP}
-atlas_cols <- setNames(
-  DiscretePalette_scCustomize(num_colors = nlevels(lung$cell_type_final), palette = "ditto_seq"),
-  levels(lung$cell_type_final)
-)
-
 compartments <- list(
   `lymphoid` = c("Tn", "CD4+Tem", "CD4+Treg", "CD8+Tem", "CD8+Tcyto", "MAIT-like", "Tinn",
                  "gdT", "ILC3", "NK", "MKI67+T/NK"),
